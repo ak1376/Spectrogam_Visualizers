@@ -3,6 +3,12 @@ from dash import dcc, html
 import plotly.graph_objs as go
 from dash.dependencies import Input, Output, State
 import numpy as np
+from scipy.io import wavfile
+import base64
+import io
+
+# Initialize the Dash app
+app = dash.Dash(__name__)
 
 # Sample data for the spectrogram and scatter plot
 x = np.linspace(0, 10, 100)
@@ -18,9 +24,22 @@ mask = np.zeros_like(y_spectrogram, dtype=bool)
 # Mapping of scatter plot points to spectrogram segments (time bins)
 scatter_to_spectrogram_mapping = [int((i / len(y_scatter)) * y_spectrogram.shape[1]) for i in range(len(y_scatter))]
 
-app = dash.Dash(__name__)
-
 app.layout = html.Div([
+    dcc.Graph(
+        id='waveform-plot',
+        style={'height': '300px'},
+        figure={
+            'data': [],
+            'layout': {
+                'title': 'Waveform',
+                'plot_bgcolor': 'black',
+                'paper_bgcolor': 'black',
+                'font': {'color': 'white'},
+                'xaxis': {'title': 'Time (s)', 'color': 'white'},
+                'yaxis': {'title': 'Amplitude', 'color': 'white'}
+            }
+        }
+    ),
     dcc.Graph(
         id='spectrogram',
         figure={
@@ -67,11 +86,28 @@ app.layout = html.Div([
         }
     ),
     html.Div([
-        html.Button('Clear Selection', id='clear-button', n_clicks=0),
-        html.Button('Show Highlighted Regions', id='show-highlighted-button', n_clicks=0),
-        html.Button('Return Indices', id='return-indices-button', n_clicks=0),
-        html.Div(id='indices-output')
-    ]),
+        html.Button('Clear Selection', id='clear-button', n_clicks=0, style={'margin': '10px'}),
+        html.Button('Show Highlighted Regions', id='show-highlighted-button', n_clicks=0, style={'margin': '10px'}),
+        html.Button('Return Indices', id='return-indices-button', n_clicks=0, style={'margin': '10px'}),
+        dcc.Upload(
+            id='uploader',
+            children=html.Button('Upload WAV File', style={
+                'margin': '10px',
+                'height': '40px',
+                'lineHeight': '40px',
+                'borderWidth': '1px',
+                'borderStyle': 'solid',
+                'borderRadius': '5px',
+                'backgroundColor': '#f0f0f0'
+            }),
+            style={
+                'display': 'inline-block'
+            },
+            multiple=False
+        )
+    ], style={'display': 'flex', 'alignItems': 'center'}),
+    html.Div(id='indices-output'),
+    html.Div(id='audio-container', children=html.Audio(id='audio', controls=True, src=''))
 ])
 
 @app.callback(
@@ -133,5 +169,48 @@ def return_indices(n_clicks):
         np.savetxt('highlighted_indices.txt', np.unique(indices[1]), fmt='%d')  # Save indices to a text file
     return ''
 
+@app.callback(
+    Output('waveform-plot', 'figure'),
+    [Input('uploader', 'contents')],
+    [State('uploader', 'filename')]
+)
+def process_uploaded_file(contents, filename):
+    if contents is None:
+        raise dash.exceptions.PreventUpdate
+
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+    wav_io = io.BytesIO(decoded)
+    sample_rate, samples = wavfile.read(wav_io)
+    
+    # Generate time values for waveform
+    time_values = np.arange(len(samples)) / sample_rate
+
+    # Create the waveform plot
+    figure = {
+        'data': [
+            go.Scatter(x=time_values, y=samples, mode='lines', line=dict(color='royalblue'))
+        ],
+        'layout': go.Layout(
+            title='Waveform',
+            plot_bgcolor='black',
+            paper_bgcolor='black',
+            font={'color': 'white'},
+            xaxis={'title': 'Time (s)', 'color': 'white'},
+            yaxis={'title': 'Amplitude', 'color': 'white'}
+        )
+    }
+    
+    return figure
+
+@app.callback(
+    Output('audio', 'src'),
+    [Input('uploader', 'contents')]
+)
+def update_audio_src(contents):
+    if contents:
+        return contents
+    return ''
+
 if __name__ == '__main__':
-    app.run_server(debug=False)
+    app.run_server(debug=True)
